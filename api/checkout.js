@@ -29,8 +29,8 @@ export default async function handler(req, res) {
     const checkoutBody = {
       product_cart: [{ product_id: PRODUCT_ID, quantity: 1 }],
       // return_url will receive ?license_key=PRO-XXXX&email=... after payment
-      return_url: 'https://stylesnap.dev/success',
-      cancel_url: 'https://stylesnap.dev',
+      return_url: 'https://style.lucidlibs.dev/success',
+      cancel_url: 'https://style.lucidlibs.dev',
       allowed_payment_method_types: [
         'credit', 'debit', 'apple_pay', 'google_pay', 'paypal',
         'ali_pay', 'we_chat_pay'

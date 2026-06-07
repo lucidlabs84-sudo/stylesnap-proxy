@@ -42,7 +42,7 @@ export default async function handler(req, res) {
       if (typeof body === 'string') {
         try { body = JSON.parse(body); } catch { body = {}; }
       }
-      const email = (body || {}).email || 'test@stylesnap.dev';
+      const email = (body || {}).email || 'test@style.lucidlibs.dev';
       const createRes = await fetch(`${DODO_BASE_URL}/licenses`, {
         method: 'POST',
         headers: {
