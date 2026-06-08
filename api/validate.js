@@ -1,9 +1,11 @@
 // Vercel Serverless Function — Validate StyleSnap Pro License Key
 // POST /api/validate
-// Body: { license_key: string }
-// Returns: { valid: boolean, status?, expires_at?, error? }
+// Body: { license_key: string, instance_id?: string }
+// Returns: { valid: boolean, status?, error? }
 //
 // Proxies to DodoPayments public /licenses/validate endpoint (no API key needed)
+// DodoPayments returns: { valid: boolean } — that's it
+// For richer info (status, activations), use /api/admin/licenses with API key
 
 const DODO_BASE_URL = process.env.DODO_ENV === 'live'
   ? 'https://live.dodopayments.com'
@@ -25,16 +27,23 @@ export default async function handler(req, res) {
     }
 
     const licenseKey = ((body || {}).license_key || '').trim();
+    const instanceId = ((body || {}).instance_id || '').trim();
 
     if (!licenseKey) {
       return res.status(200).json({ valid: false, error: 'License key is required.' });
+    }
+
+    // Build validate request — include instance_id if available for instance-specific validation
+    const validateBody = { license_key: licenseKey };
+    if (instanceId) {
+      validateBody.license_key_instance_id = instanceId;
     }
 
     // DodoPayments public endpoint — no API key needed
     const validateRes = await fetch(`${DODO_BASE_URL}/licenses/validate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ license_key: licenseKey }),
+      body: JSON.stringify(validateBody),
     });
 
     const data = await validateRes.json();
@@ -49,8 +58,6 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       valid: data.valid === true,
-      status: data.status || null,
-      expires_at: data.expires_at || null,
     });
 
   } catch (err) {

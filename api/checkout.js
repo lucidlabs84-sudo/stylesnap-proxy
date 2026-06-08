@@ -1,7 +1,9 @@
 // Vercel Serverless Function — Create Dodo Payments Checkout for StyleSnap Pro
 // POST /api/checkout
-// Body: { email?: string }
+// Body: { email?: string, return_url?: string }
 // Returns: { checkout_url: string, session_id: string }
+//
+// After payment, DodoPayments redirects to return_url with ?license_key=xxx&email=xxx
 
 const DODO_API_KEY = process.env.DODO_API_KEY || '';
 const DODO_BASE_URL = process.env.DODO_ENV === 'live'
@@ -25,12 +27,15 @@ export default async function handler(req, res) {
     }
 
     const email = (body || {}).email || '';
+    // Allow dynamic return_url (extension passes chrome.runtime.getURL)
+    const returnUrl = (body || {}).return_url || 'https://style.lucidlibs.dev/success';
+    const cancelUrl = (body || {}).cancel_url || 'https://style.lucidlibs.dev';
 
     const checkoutBody = {
       product_cart: [{ product_id: PRODUCT_ID, quantity: 1 }],
-      // return_url will receive ?license_key=PRO-XXXX&email=... after payment
-      return_url: 'https://style.lucidlibs.dev/success',
-      cancel_url: 'https://style.lucidlibs.dev',
+      // return_url will receive ?license_key=xxx&email=xxx after payment
+      return_url: returnUrl,
+      cancel_url: cancelUrl,
       allowed_payment_method_types: [
         'credit', 'debit', 'apple_pay', 'google_pay', 'paypal',
         'ali_pay', 'we_chat_pay'

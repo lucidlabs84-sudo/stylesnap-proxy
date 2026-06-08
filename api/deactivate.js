@@ -4,6 +4,8 @@
 // Returns: { deactivated: boolean, error? }
 //
 // Proxies to DodoPayments public /licenses/deactivate endpoint (no API key needed)
+// DodoPayments request: { license_key, license_key_instance_id }
+// DodoPayments response: 200 on success (empty body), 403/404/500 on error
 
 const DODO_BASE_URL = process.env.DODO_ENV === 'live'
   ? 'https://live.dodopayments.com'
@@ -50,12 +52,17 @@ export default async function handler(req, res) {
 
     if (!deactivateRes.ok) {
       console.error('[Deactivate] Dodo error:', deactivateRes.status, text);
-      const errMsg = (data.error || data.message || '').toString();
-      // Check for specific error codes
-      const isNotFound = data.code === 'LICENSE_KEY_NOT_FOUND';
+
+      let errMsg = (data.error || data.message || '').toString();
+      if (deactivateRes.status === 403) {
+        errMsg = 'Instance not found or does not belong to this license key.';
+      } else if (deactivateRes.status === 404) {
+        errMsg = 'License key not found. It may have been revoked.';
+      }
+
       return res.status(200).json({
         deactivated: false,
-        error: isNotFound ? 'Instance not found. It may have already been deactivated.' : (errMsg || 'Deactivation failed.'),
+        error: errMsg || 'Deactivation failed.',
       });
     }
 
