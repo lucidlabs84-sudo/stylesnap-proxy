@@ -72,7 +72,7 @@ async function findLicenseKeyByEmail(email) {
     for (const c of custItems) {
       const cEmail = (c.email || '').toLowerCase().trim();
       if (cEmail === targetEmail) {
-        customerId = c.id;
+        customerId = c.customer_id || c.id || '';
         customerName = c.name || '';
         break;
       }
