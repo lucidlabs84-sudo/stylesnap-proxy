@@ -5,9 +5,10 @@
 //
 // Flow:
 //   1. Accept email from user
-//   2. Paginate DodoPayments GET /license_keys (filtered by product_id) to find matching customer email
-//   3. If found, send the license key to that email via Resend
-//   4. Rate limit: in-memory Map (resets on cold start, acceptable for low traffic)
+//   2. Paginate DodoPayments GET /customers to find matching email → get customer_id
+//   3. Use customer_id to query GET /license_keys?customer_id=xxx → get license key
+//   4. If found, send the license key to that email via Resend
+//   5. Rate limit: in-memory Map (resets on cold start, acceptable for low traffic)
 
 const DODO_API_KEY = process.env.DODO_API_KEY || '';
 const DODO_BASE_URL = process.env.DODO_ENV === 'live'
@@ -41,56 +42,94 @@ function isRateLimited(email) {
 
 async function findLicenseKeyByEmail(email) {
   const targetEmail = email.toLowerCase().trim();
-  let pageNumber = 0;
+  const headers = { 'Authorization': `Bearer ${DODO_API_KEY}` };
+
+  // Step 1: Find customer by email — paginate through all customers
+  let customerId = null;
+  let customerName = '';
+  let customerPage = 0;
   const pageSize = 100;
-  const maxPages = 20; // Safety limit: 20 * 100 = 2000 keys max
+  const maxPages = 50; // Safety limit
 
-  while (pageNumber < maxPages) {
+  while (customerPage < maxPages && !customerId) {
     const params = new URLSearchParams();
-    params.set('product_id', PRODUCT_ID);
     params.set('page_size', pageSize.toString());
-    params.set('page_number', pageNumber.toString());
+    params.set('page_number', customerPage.toString());
 
-    const res = await fetch(
-      `${DODO_BASE_URL}/license_keys?${params.toString()}`,
-      { headers: { 'Authorization': `Bearer ${DODO_API_KEY}` } }
+    const custRes = await fetch(
+      `${DODO_BASE_URL}/customers?${params.toString()}`,
+      { headers }
     );
 
-    if (!res.ok) {
-      console.error('[Recover] Dodo API error:', res.status, await res.text());
+    if (!custRes.ok) {
+      console.error('[Recover] Dodo customers API error:', custRes.status, await custRes.text());
       return null;
     }
 
-    const data = await res.json();
-    const items = data.items || data.data || data || [];
+    const custData = await custRes.json();
+    const custItems = custData.items || custData.data || custData || [];
 
-    // DodoPayments license_keys response contains customer info
-    for (const key of items) {
-      const customerEmail = (key.customer?.email || '').toLowerCase().trim();
-      if (customerEmail === targetEmail) {
-        return {
-          license_key: key.key || key.license_key || '',
-          status: key.status || '',
-          activations_limit: key.activations_limit || 2,
-          activations_used: key.activations_used ?? 0,
-          created_at: key.created_at || '',
-          expires_at: key.expires_at || null,
-          customer_email: customerEmail,
-          customer_name: key.customer?.name || '',
-          product_name: key.product?.name || 'StyleSnap Pro',
-        };
+    for (const c of custItems) {
+      const cEmail = (c.email || '').toLowerCase().trim();
+      if (cEmail === targetEmail) {
+        customerId = c.id;
+        customerName = c.name || '';
+        break;
       }
     }
 
-    // Check if there are more pages
-    const totalItems = data.total_count || data.total || items.length;
-    if ((pageNumber + 1) * pageSize >= totalItems || items.length < pageSize) {
+    // Check pagination
+    const totalCustomers = custData.total_count || custData.total || custItems.length;
+    if (custItems.length < pageSize || (customerPage + 1) * pageSize >= totalCustomers) {
       break;
     }
-    pageNumber++;
+    customerPage++;
   }
 
-  return null; // Not found
+  if (!customerId) {
+    console.log(`[Recover] No customer found for email: ${targetEmail}`);
+    return null;
+  }
+
+  console.log(`[Recover] Found customer: ${customerId} (${customerName})`);
+
+  // Step 2: Get license keys for this customer
+  const licParams = new URLSearchParams();
+  licParams.set('product_id', PRODUCT_ID);
+  licParams.set('customer_id', customerId);
+
+  const licRes = await fetch(
+    `${DODO_BASE_URL}/license_keys?${licParams.toString()}`,
+    { headers }
+  );
+
+  if (!licRes.ok) {
+    console.error('[Recover] Dodo license_keys API error:', licRes.status, await licRes.text());
+    return null;
+  }
+
+  const licData = await licRes.json();
+  const licItems = licData.items || licData.data || licData || [];
+
+  if (licItems.length === 0) {
+    console.log(`[Recover] No license keys found for customer: ${customerId}`);
+    return null;
+  }
+
+  // Return the first active license key
+  const activeKey = licItems.find(k => k.status === 'active') || licItems[0];
+
+  return {
+    license_key: activeKey.key || activeKey.license_key || '',
+    status: activeKey.status || '',
+    activations_limit: activeKey.activations_limit || 2,
+    activations_used: activeKey.instances_count ?? 0,
+    created_at: activeKey.created_at || '',
+    expires_at: activeKey.expires_at || null,
+    customer_email: targetEmail,
+    customer_name: customerName,
+    product_name: 'StyleSnap Pro',
+  };
 }
 
 async function sendRecoveryEmail(licenseInfo) {
