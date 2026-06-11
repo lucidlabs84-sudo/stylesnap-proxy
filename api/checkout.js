@@ -28,8 +28,8 @@ export default async function handler(req, res) {
 
     const email = (body || {}).email || '';
     // Allow dynamic return_url (extension passes chrome.runtime.getURL)
-    const returnUrl = (body || {}).return_url || 'https://style.lucidlibs.dev/success';
-    const cancelUrl = (body || {}).cancel_url || 'https://style.lucidlibs.dev';
+    const returnUrl = (body || {}).return_url || 'https://lucidlibs.dev/stylesnap/success';
+    const cancelUrl = (body || {}).cancel_url || 'https://lucidlibs.dev/stylesnap';
 
     const checkoutBody = {
       product_cart: [{ product_id: PRODUCT_ID, quantity: 1 }],
