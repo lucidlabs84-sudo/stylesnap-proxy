@@ -1,28 +1,26 @@
 /**
- * Shared DodoPayments Config — reads env from Supabase with in-memory cache
+ * Shared DodoPayments Config
  *
- * Instead of process.env.DODO_ENV (which requires redeploy to change),
- * we read the current env from Supabase `dodo_config` table.
- * The admin panel writes to this table to switch test/live instantly.
+ * Dodo Payments uses the SAME API key for test and live.
+ * Only the base URL changes:
+ *   test → https://test.dodopayments.com
+ *   live  → https://live.dodopayments.com
  *
- * Fallback: if Supabase is unavailable, falls back to process.env.DODO_ENV.
+ * Env is read from Supabase `dodo_config` table (key='dodo_env').
+ * Admin panel writes here → instant switch, no redeploy.
  */
 
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-// Cache: { data, expiry }
-let configCache = null;
-const CACHE_TTL_MS = 30_000; // 30 seconds
-
-// API keys from env vars (both test and live are always available)
-const API_KEYS = {
-  test: process.env.DODO_API_KEY_TEST || process.env.DODO_API_KEY || '',
-  live: process.env.DODO_API_KEY_LIVE || '',
-};
+// Single API key for BOTH environments — Dodo does NOT have separate test/live keys
+const API_KEY =
+  process.env.DODO_API_KEY_LIVE ||
+  process.env.DODO_API_KEY ||
+  '';
 
 const PRODUCT_IDS = {
-  test: process.env.DODO_PRODUCT_ID_TEST || process.env.DODO_PRODUCT_ID || 'pdt_0NgJpLrjYb5WyvHwo2Z5X',
+  test: process.env.DODO_PRODUCT_ID_TEST || 'pdt_0NgJpLrjYb5WyvHwo2Z5X',
   live: process.env.DODO_PRODUCT_ID_LIVE || 'pdt_0Ngn5Lx3viEHrW1dSSp0i',
 };
 
@@ -31,10 +29,10 @@ const BASE_URLS = {
   live: 'https://live.dodopayments.com',
 };
 
-/**
- * Read current env from Supabase dodo_config table.
- * Returns 'test' or 'live'.
- */
+// Cache: { data, expiry }
+let configCache = null;
+const CACHE_TTL_MS = 30_000;
+
 async function readEnvFromSupabase() {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     return process.env.DODO_ENV === 'live' ? 'live' : 'test';
@@ -59,63 +57,38 @@ async function readEnvFromSupabase() {
     const data = await res.json();
     if (Array.isArray(data) && data.length > 0 && data[0].value) {
       const env = data[0].value;
-      if (env === 'test' || env === 'live') {
-        return env;
-      }
+      if (env === 'test' || env === 'live') return env;
     }
-
-    return 'test'; // default
+    return 'test';
   } catch (err) {
     console.error('[Config] Supabase error:', err.message);
     return process.env.DODO_ENV === 'live' ? 'live' : 'test';
   }
 }
 
-/**
- * Get the current DodoPayments configuration.
- * Reads env from Supabase (cached for 30s) and returns the matching config.
- *
- * @returns {Promise<{env: 'test'|'live', baseUrl: string, apiKey: string, productId: string}>}
- */
 async function getConfig() {
   const now = Date.now();
-
-  if (configCache && configCache.expiry > now) {
-    return configCache.data;
-  }
+  if (configCache && configCache.expiry > now) return configCache.data;
 
   const env = await readEnvFromSupabase();
   const config = {
     env,
     baseUrl: BASE_URLS[env],
-    apiKey: API_KEYS[env],
+    apiKey: API_KEY, // ← same key for BOTH test and live
     productId: PRODUCT_IDS[env],
   };
 
-  configCache = {
-    data: config,
-    expiry: now + CACHE_TTL_MS,
-  };
-
+  configCache = { data: config, expiry: now + CACHE_TTL_MS };
   return config;
 }
 
-/**
- * Get config synchronously from cache, or fallback to process.env.
- * Use this only when you can't use async (top-level module scope).
- * Prefer getConfig() in handler functions.
- */
 function getConfigSync() {
-  if (configCache && configCache.expiry > Date.now()) {
-    return configCache.data;
-  }
-
-  // Fallback: use process.env directly (legacy behavior)
+  if (configCache && configCache.expiry > Date.now()) return configCache.data;
   const env = process.env.DODO_ENV === 'live' ? 'live' : 'test';
   return {
     env,
     baseUrl: BASE_URLS[env],
-    apiKey: API_KEYS[env],
+    apiKey: API_KEY,
     productId: PRODUCT_IDS[env],
   };
 }
