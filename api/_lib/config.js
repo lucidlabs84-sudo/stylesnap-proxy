@@ -1,25 +1,20 @@
 /**
  * Shared DodoPayments Config
  *
- * Dodo Payments uses the SAME API key for test and live.
- * Only the base URL changes:
- *   test → https://test.dodopayments.com
- *   live  → https://live.dodopayments.com
+ * ALL config is read from Supabase `dodo_config` table.
+ * Nothing comes from Vercel env vars (except SUPABASE_* to connect).
  *
- * Env is read from Supabase `dodo_config` table (key='dodo_env').
+ * Supabase rows needed:
+ *   dodo_api_key         – single key, works for both test & live endpoints
+ *   dodo_env             – 'test' or 'live'
+ *   dodo_product_id_test  – product ID for test mode
+ *   dodo_product_id_live  – product ID for live mode
+ *
  * Admin panel writes here → instant switch, no redeploy.
  */
 
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-
-// Single API key for BOTH environments — Dodo does NOT have separate test/live keys
-const API_KEY = process.env.DODO_API_KEY || '';
-
-const PRODUCT_IDS = {
-  test: process.env.DODO_PRODUCT_ID_TEST || 'pdt_0NgJpLrjYb5WyvHwo2Z5X',
-  live: process.env.DODO_PRODUCT_ID_LIVE || 'pdt_0Ngn5Lx3viEHrW1dSSp0i',
-};
 
 const BASE_URLS = {
   test: 'https://test.dodopayments.com',
@@ -30,14 +25,15 @@ const BASE_URLS = {
 let configCache = null;
 const CACHE_TTL_MS = 30_000;
 
-async function readEnvFromSupabase() {
+// Read a single key from Supabase dodo_config table
+async function readFromSupabase(key) {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    return process.env.DODO_ENV === 'live' ? 'live' : 'test';
+    console.error('[Config] Missing SUPABASE_URL or SERVICE_ROLE_KEY');
+    return null;
   }
-
   try {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/dodo_config?key=eq.dodo_env&select=value`,
+      `${SUPABASE_URL}/rest/v1/dodo_config?key=eq.${key}&select=value`,
       {
         headers: {
           apikey: SUPABASE_SERVICE_ROLE_KEY,
@@ -45,21 +41,42 @@ async function readEnvFromSupabase() {
         },
       }
     );
-
-    if (!res.ok) {
-      console.error('[Config] Supabase read failed:', res.status);
-      return process.env.DODO_ENV === 'live' ? 'live' : 'test';
-    }
-
+    if (!res.ok) return null;
     const data = await res.json();
-    if (Array.isArray(data) && data.length > 0 && data[0].value) {
-      const env = data[0].value;
-      if (env === 'test' || env === 'live') return env;
-    }
-    return 'test';
+    if (Array.isArray(data) && data.length > 0) return data[0].value;
+    return null;
   } catch (err) {
-    console.error('[Config] Supabase error:', err.message);
-    return process.env.DODO_ENV === 'live' ? 'live' : 'test';
+    console.error(`[Config] Supabase read error (${key}):`, err.message);
+    return null;
+  }
+}
+
+// Read all config from Supabase at once (single round-trip)
+async function readAllFromSupabase() {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    console.error('[Config] Missing SUPABASE_URL or SERVICE_ROLE_KEY');
+    return null;
+  }
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/dodo_config?select=key,value`,
+      {
+        headers: {
+          apikey: SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        },
+      }
+    );
+    if (!res.ok) return null;
+    const rows = await res.json();
+    const config = {};
+    for (const row of rows) {
+      config[row.key] = row.value;
+    }
+    return config;
+  } catch (err) {
+    console.error('[Config] Supabase batch read error:', err.message);
+    return null;
   }
 }
 
@@ -67,12 +84,18 @@ async function getConfig() {
   const now = Date.now();
   if (configCache && configCache.expiry > now) return configCache.data;
 
-  const env = await readEnvFromSupabase();
+  const dbConfig = await readAllFromSupabase();
+
+  // Defaults if Supabase is unavailable
+  const env       = dbConfig?.dodo_env || 'live';
+  const apiKey    = dbConfig?.dodo_api_key || '';
+  const productId = dbConfig?.[`dodo_product_id_${env}`] || '';
+
   const config = {
     env,
-    baseUrl: BASE_URLS[env],
-    apiKey: API_KEY, // ← same key for BOTH test and live
-    productId: PRODUCT_IDS[env],
+    baseUrl:   BASE_URLS[env],
+    apiKey,
+    productId,
   };
 
   configCache = { data: config, expiry: now + CACHE_TTL_MS };
@@ -81,12 +104,12 @@ async function getConfig() {
 
 function getConfigSync() {
   if (configCache && configCache.expiry > Date.now()) return configCache.data;
-  const env = process.env.DODO_ENV === 'live' ? 'live' : 'test';
+  // Sync fallback — only used during cold start before async available
   return {
-    env,
-    baseUrl: BASE_URLS[env],
-    apiKey: API_KEY,
-    productId: PRODUCT_IDS[env],
+    env:       'live',
+    baseUrl:   BASE_URLS.live,
+    apiKey:    '',
+    productId: '',
   };
 }
 
