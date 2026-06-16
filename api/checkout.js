@@ -2,14 +2,8 @@
 // POST /api/checkout
 // Body: { email?: string, return_url?: string }
 // Returns: { checkout_url: string, session_id: string }
-//
-// After payment, DodoPayments redirects to return_url with ?license_key=xxx&email=xxx
 
-const DODO_API_KEY = process.env.DODO_API_KEY || '';
-const DODO_BASE_URL = process.env.DODO_ENV === 'live'
-  ? 'https://live.dodopayments.com'
-  : 'https://test.dodopayments.com';
-const PRODUCT_ID = process.env.DODO_PRODUCT_ID || 'pdt_0NgJpLrjYb5WyvHwo2Z5X';
+const { getConfig } = require('./_lib/config');
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -21,19 +15,18 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
+    const config = await getConfig();
     let body = req.body;
     if (typeof body === 'string') {
       try { body = JSON.parse(body); } catch { body = {}; }
     }
 
     const email = (body || {}).email || '';
-    // Allow dynamic return_url (extension passes chrome.runtime.getURL)
     const returnUrl = (body || {}).return_url || 'https://lucidlibs.dev/stylesnap/success';
     const cancelUrl = (body || {}).cancel_url || 'https://lucidlibs.dev/stylesnap';
 
     const checkoutBody = {
-      product_cart: [{ product_id: PRODUCT_ID, quantity: 1 }],
-      // return_url will receive ?license_key=xxx&email=xxx after payment
+      product_cart: [{ product_id: config.productId, quantity: 1 }],
       return_url: returnUrl,
       cancel_url: cancelUrl,
       allowed_payment_method_types: [
@@ -48,10 +41,10 @@ export default async function handler(req, res) {
       checkoutBody.customer = { email };
     }
 
-    const dodoRes = await fetch(`${DODO_BASE_URL}/checkouts`, {
+    const dodoRes = await fetch(`${config.baseUrl}/checkouts`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${DODO_API_KEY}`,
+        'Authorization': `Bearer ${config.apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(checkoutBody),

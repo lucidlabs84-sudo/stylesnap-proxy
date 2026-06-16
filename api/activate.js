@@ -2,13 +2,8 @@
 // POST /api/activate
 // Body: { license_key: string, device_name: string }
 // Returns: { activated: boolean, instance_id?, customer_email?, product_name?, error?, limit_reached? }
-//
-// Proxies to DodoPayments public /licenses/activate endpoint (no API key needed)
-// DodoPayments returns: { id, business_id, name, license_key_id, created_at, product, customer }
 
-const DODO_BASE_URL = process.env.DODO_ENV === 'live'
-  ? 'https://live.dodopayments.com'
-  : 'https://test.dodopayments.com';
+const { getConfig } = require('./_lib/config');
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -20,6 +15,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
+    const config = await getConfig();
     let body = req.body;
     if (typeof body === 'string') {
       try { body = JSON.parse(body); } catch { body = {}; }
@@ -32,9 +28,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ activated: false, error: 'License key is required.' });
     }
 
-    // DodoPayments public endpoint — no API key needed
-    // Required fields: license_key, name
-    const activateRes = await fetch(`${DODO_BASE_URL}/licenses/activate`, {
+    const activateRes = await fetch(`${config.baseUrl}/licenses/activate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -48,17 +42,14 @@ export default async function handler(req, res) {
     if (!activateRes.ok) {
       console.error('[Activate] Dodo error:', activateRes.status, JSON.stringify(data));
 
-      // Map DodoPayments error codes to user-friendly messages
       let errMsg = data.error || data.message || 'Activation failed.';
       let limitReached = false;
 
       if (activateRes.status === 403) {
-        // License cannot be activated (inactive/disabled)
         errMsg = 'This license key is not active. It may have been disabled or expired.';
       } else if (activateRes.status === 404) {
         errMsg = 'License key not found. Please check and try again.';
       } else if (activateRes.status === 422) {
-        // Activation limit reached
         errMsg = 'Activation limit reached. Deactivate another device first.';
         limitReached = true;
       }
@@ -70,7 +61,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // Extract customer and product info from activation response
     const customerEmail = data.customer?.email || '';
     const customerName = data.customer?.name || '';
     const productName = data.product?.name || '';

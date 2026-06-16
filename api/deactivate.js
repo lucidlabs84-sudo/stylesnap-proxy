@@ -2,14 +2,8 @@
 // POST /api/deactivate
 // Body: { license_key: string, instance_id: string }
 // Returns: { deactivated: boolean, error? }
-//
-// Proxies to DodoPayments public /licenses/deactivate endpoint (no API key needed)
-// DodoPayments request: { license_key, license_key_instance_id }
-// DodoPayments response: 200 on success (empty body), 403/404/500 on error
 
-const DODO_BASE_URL = process.env.DODO_ENV === 'live'
-  ? 'https://live.dodopayments.com'
-  : 'https://test.dodopayments.com';
+const { getConfig } = require('./_lib/config');
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -21,6 +15,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
+    const config = await getConfig();
     let body = req.body;
     if (typeof body === 'string') {
       try { body = JSON.parse(body); } catch { body = {}; }
@@ -33,8 +28,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ deactivated: false, error: 'License key and instance ID are required.' });
     }
 
-    // DodoPayments public endpoint — no API key needed
-    const deactivateRes = await fetch(`${DODO_BASE_URL}/licenses/deactivate`, {
+    const deactivateRes = await fetch(`${config.baseUrl}/licenses/deactivate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -43,7 +37,6 @@ export default async function handler(req, res) {
       }),
     });
 
-    // DodoPayments deactivate returns 200 with empty body on success
     const text = await deactivateRes.text();
     let data = {};
     if (text) {

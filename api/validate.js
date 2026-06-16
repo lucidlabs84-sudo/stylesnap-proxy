@@ -2,14 +2,8 @@
 // POST /api/validate
 // Body: { license_key: string, instance_id?: string }
 // Returns: { valid: boolean, status?, error? }
-//
-// Proxies to DodoPayments public /licenses/validate endpoint (no API key needed)
-// DodoPayments returns: { valid: boolean } — that's it
-// For richer info (status, activations), use /api/admin/licenses with API key
 
-const DODO_BASE_URL = process.env.DODO_ENV === 'live'
-  ? 'https://live.dodopayments.com'
-  : 'https://test.dodopayments.com';
+const { getConfig } = require('./_lib/config');
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -21,6 +15,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
+    const config = await getConfig();
     let body = req.body;
     if (typeof body === 'string') {
       try { body = JSON.parse(body); } catch { body = {}; }
@@ -33,14 +28,12 @@ export default async function handler(req, res) {
       return res.status(200).json({ valid: false, error: 'License key is required.' });
     }
 
-    // Build validate request — include instance_id if available for instance-specific validation
     const validateBody = { license_key: licenseKey };
     if (instanceId) {
       validateBody.license_key_instance_id = instanceId;
     }
 
-    // DodoPayments public endpoint — no API key needed
-    const validateRes = await fetch(`${DODO_BASE_URL}/licenses/validate`, {
+    const validateRes = await fetch(`${config.baseUrl}/licenses/validate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(validateBody),

@@ -2,14 +2,8 @@
 // POST /api/verify
 // Body: { license_key?: string, email?: string }
 // Returns: { valid: boolean, ... }
-//
-// If license_key provided → proxy to /licenses/validate (new flow)
-// If email provided → legacy email-based verification (old flow)
 
-const DODO_API_KEY = process.env.DODO_API_KEY || '';
-const DODO_BASE_URL = process.env.DODO_ENV === 'live'
-  ? 'https://live.dodopayments.com'
-  : 'https://test.dodopayments.com';
+const { getConfig } = require('./_lib/config');
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -21,6 +15,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
+    const config = await getConfig();
     let body = req.body;
     if (typeof body === 'string') {
       try { body = JSON.parse(body); } catch { body = {}; }
@@ -31,7 +26,7 @@ export default async function handler(req, res) {
 
     // --- New flow: License Key validation (public endpoint, no API key) ---
     if (licenseKey) {
-      const validateRes = await fetch(`${DODO_BASE_URL}/licenses/validate`, {
+      const validateRes = await fetch(`${config.baseUrl}/licenses/validate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ license_key: licenseKey }),
@@ -61,10 +56,10 @@ export default async function handler(req, res) {
     }
 
     const customerRes = await fetch(
-      `${DODO_BASE_URL}/customers?email=${encodeURIComponent(email)}&page_size=5`,
+      `${config.baseUrl}/customers?email=${encodeURIComponent(email)}&page_size=5`,
       {
         headers: {
-          'Authorization': `Bearer ${DODO_API_KEY}`,
+          'Authorization': `Bearer ${config.apiKey}`,
           'Content-Type': 'application/json',
         },
       }
@@ -83,10 +78,10 @@ export default async function handler(req, res) {
 
     for (const customer of customers) {
       const paymentRes = await fetch(
-        `${DODO_BASE_URL}/payments?customer_id=${encodeURIComponent(customer.customer_id)}&status=succeeded&page_size=10`,
+        `${config.baseUrl}/payments?customer_id=${encodeURIComponent(customer.customer_id)}&status=succeeded&page_size=10`,
         {
           headers: {
-            'Authorization': `Bearer ${DODO_API_KEY}`,
+            'Authorization': `Bearer ${config.apiKey}`,
             'Content-Type': 'application/json',
           },
         }

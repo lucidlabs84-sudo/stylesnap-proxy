@@ -2,15 +2,8 @@
 // GET  /api/admin/licenses — List all license keys for the product
 // POST /api/admin/licenses — Create a license key manually
 // PATCH /api/admin/licenses?id=xxx — Update a license key (status, activations_limit)
-//
-// Uses DodoPayments /license_keys endpoints (API key required)
-// Note: DodoPayments has NO delete endpoint — use Revoke Grant from Entitlements instead
 
-const DODO_API_KEY = process.env.DODO_API_KEY || '';
-const DODO_BASE_URL = process.env.DODO_ENV === 'live'
-  ? 'https://live.dodopayments.com'
-  : 'https://test.dodopayments.com';
-const PRODUCT_ID = process.env.DODO_PRODUCT_ID || 'pdt_0NgJpLrjYb5WyvHwo2Z5X';
+const { getConfig } = require('./_lib/config');
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -20,12 +13,14 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
+  const config = await getConfig();
+
   // --- GET: List license keys ---
   if (req.method === 'GET') {
     try {
       const { page_size, page_number, status, customer_id, source } = req.query || {};
       const params = new URLSearchParams();
-      params.set('product_id', PRODUCT_ID);
+      params.set('product_id', config.productId);
       if (page_size) params.set('page_size', page_size);
       if (page_number) params.set('page_number', page_number);
       if (status) params.set('status', status);
@@ -33,8 +28,8 @@ export default async function handler(req, res) {
       if (source) params.set('source', source);
 
       const listRes = await fetch(
-        `${DODO_BASE_URL}/license_keys?${params.toString()}`,
-        { headers: { 'Authorization': `Bearer ${DODO_API_KEY}` } }
+        `${config.baseUrl}/license_keys?${params.toString()}`,
+        { headers: { 'Authorization': `Bearer ${config.apiKey}` } }
       );
       const data = await listRes.json();
       if (!listRes.ok) {
@@ -54,7 +49,7 @@ export default async function handler(req, res) {
         try { body = JSON.parse(body); } catch { body = {}; }
       }
       const customerId = (body || {}).customer_id || '';
-      const key = (body || {}).key || '';  // Optional: import existing key
+      const key = (body || {}).key || '';
       const activationsLimit = (body || {}).activations_limit ?? 2;
 
       if (!customerId) {
@@ -62,17 +57,16 @@ export default async function handler(req, res) {
       }
 
       const createBody = {
-        product_id: PRODUCT_ID,
+        product_id: config.productId,
         customer_id: customerId,
         activations_limit: activationsLimit,
       };
-      // If key provided, import it
       if (key) createBody.key = key;
 
-      const createRes = await fetch(`${DODO_BASE_URL}/license_keys`, {
+      const createRes = await fetch(`${config.baseUrl}/license_keys`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${DODO_API_KEY}`,
+          'Authorization': `Bearer ${config.apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(createBody),
@@ -103,10 +97,10 @@ export default async function handler(req, res) {
       if (body.activations_limit !== undefined) updateBody.activations_limit = body.activations_limit;
       if (body.expires_at !== undefined) updateBody.expires_at = body.expires_at;
 
-      const updateRes = await fetch(`${DODO_BASE_URL}/license_keys/${licenseId}`, {
+      const updateRes = await fetch(`${config.baseUrl}/license_keys/${licenseId}`, {
         method: 'PATCH',
         headers: {
-          'Authorization': `Bearer ${DODO_API_KEY}`,
+          'Authorization': `Bearer ${config.apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(updateBody),

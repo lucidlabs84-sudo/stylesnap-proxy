@@ -1,13 +1,7 @@
 // Vercel Serverless Function — List License Key Instances
-// GET /api/instances?license_key_id=xxx — List instances for a license key (requires API key)
-//
-// DodoPayments API: GET /license_key_instances?license_key_id=xxx
-// Returns: { items: [{ id, name, created_at, ... }] }
+// GET /api/instances?license_key_id=xxx
 
-const DODO_API_KEY = process.env.DODO_API_KEY || '';
-const DODO_BASE_URL = process.env.DODO_ENV === 'live'
-  ? 'https://live.dodopayments.com'
-  : 'https://test.dodopayments.com';
+const { getConfig } = require('./_lib/config');
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -22,6 +16,7 @@ export default async function handler(req, res) {
   }
 
   try {
+    const config = await getConfig();
     const { license_key_id, page_size, page_number } = req.query || {};
 
     if (!license_key_id) {
@@ -34,8 +29,8 @@ export default async function handler(req, res) {
     if (page_number) params.set('page_number', page_number);
 
     const listRes = await fetch(
-      `${DODO_BASE_URL}/license_key_instances?${params.toString()}`,
-      { headers: { 'Authorization': `Bearer ${DODO_API_KEY}` } }
+      `${config.baseUrl}/license_key_instances?${params.toString()}`,
+      { headers: { 'Authorization': `Bearer ${config.apiKey}` } }
     );
 
     const data = await listRes.json();

@@ -2,26 +2,16 @@
 // POST /api/recover
 // Body: { email: string }
 // Returns: { sent: boolean, message: string }
-//
-// Flow:
-//   1. Accept email from user
-//   2. Paginate DodoPayments GET /customers to find matching email → get customer_id
-//   3. Use customer_id to query GET /license_keys?customer_id=xxx → get license key
-//   4. If found, send the license key to that email via Resend
-//   5. Rate limit: in-memory Map (resets on cold start, acceptable for low traffic)
 
-const DODO_API_KEY = process.env.DODO_API_KEY || '';
-const DODO_BASE_URL = process.env.DODO_ENV === 'live'
-  ? 'https://live.dodopayments.com'
-  : 'https://test.dodopayments.com';
-const PRODUCT_ID = process.env.DODO_PRODUCT_ID || 'pdt_0NgJpLrjYb5WyvHwo2Z5X';
+const { getConfig } = require('./_lib/config');
+
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const FROM_EMAIL = process.env.FROM_EMAIL || 'StyleSnap <noreply@lucidlibs.dev>';
 const RECOVERY_URL = process.env.RECOVERY_URL || 'https://style.lucidlibs.dev/recover';
 
 // Simple in-memory rate limiter (per email, 10 min cooldown)
 const rateLimitMap = new Map();
-const RATE_LIMIT_MS = 10 * 60 * 1000; // 10 minutes
+const RATE_LIMIT_MS = 10 * 60 * 1000;
 
 function isRateLimited(email) {
   const key = email.toLowerCase().trim();
@@ -30,7 +20,6 @@ function isRateLimited(email) {
     return true;
   }
   rateLimitMap.set(key, Date.now());
-  // Cleanup old entries every 100 requests
   if (rateLimitMap.size > 500) {
     const cutoff = Date.now() - RATE_LIMIT_MS;
     for (const [k, v] of rateLimitMap) {
@@ -40,16 +29,16 @@ function isRateLimited(email) {
   return false;
 }
 
-async function findLicenseKeyByEmail(email) {
+async function findLicenseKeyByEmail(email, config) {
   const targetEmail = email.toLowerCase().trim();
-  const headers = { 'Authorization': `Bearer ${DODO_API_KEY}` };
+  const headers = { 'Authorization': `Bearer ${config.apiKey}` };
 
-  // Step 1: Find customer by email — paginate through all customers
+  // Step 1: Find customer by email
   let customerId = null;
   let customerName = '';
   let customerPage = 0;
   const pageSize = 100;
-  const maxPages = 50; // Safety limit
+  const maxPages = 50;
 
   while (customerPage < maxPages && !customerId) {
     const params = new URLSearchParams();
@@ -57,7 +46,7 @@ async function findLicenseKeyByEmail(email) {
     params.set('page_number', customerPage.toString());
 
     const custRes = await fetch(
-      `${DODO_BASE_URL}/customers?${params.toString()}`,
+      `${config.baseUrl}/customers?${params.toString()}`,
       { headers }
     );
 
@@ -78,7 +67,6 @@ async function findLicenseKeyByEmail(email) {
       }
     }
 
-    // Check pagination
     const totalCustomers = custData.total_count || custData.total || custItems.length;
     if (custItems.length < pageSize || (customerPage + 1) * pageSize >= totalCustomers) {
       break;
@@ -95,11 +83,11 @@ async function findLicenseKeyByEmail(email) {
 
   // Step 2: Get license keys for this customer
   const licParams = new URLSearchParams();
-  licParams.set('product_id', PRODUCT_ID);
+  licParams.set('product_id', config.productId);
   licParams.set('customer_id', customerId);
 
   const licRes = await fetch(
-    `${DODO_BASE_URL}/license_keys?${licParams.toString()}`,
+    `${config.baseUrl}/license_keys?${licParams.toString()}`,
     { headers }
   );
 
@@ -116,7 +104,6 @@ async function findLicenseKeyByEmail(email) {
     return null;
   }
 
-  // Return the first active license key
   const activeKey = licItems.find(k => k.status === 'active') || licItems[0];
 
   return {
@@ -134,10 +121,6 @@ async function findLicenseKeyByEmail(email) {
 
 async function sendRecoveryEmail(licenseInfo) {
   const { license_key, customer_email, customer_name, product_name, status, activations_limit, activations_used } = licenseInfo;
-
-  const maskedKey = license_key.length > 12
-    ? license_key.substring(0, 8) + '•••••••' + license_key.slice(-4)
-    : '•••••••';
 
   const greeting = customer_name ? `Hi ${customer_name},` : 'Hello,';
 
@@ -241,6 +224,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
+    const config = await getConfig();
     let body = req.body;
     if (typeof body === 'string') {
       try { body = JSON.parse(body); } catch { body = {}; }
@@ -252,7 +236,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ sent: false, message: 'Please enter a valid email address.' });
     }
 
-    // Rate limit check
     if (isRateLimited(email)) {
       return res.status(200).json({
         sent: false,
@@ -261,13 +244,10 @@ export default async function handler(req, res) {
       });
     }
 
-    // Find license key by email
     console.log(`[Recover] Searching for email: ${email}`);
-    const licenseInfo = await findLicenseKeyByEmail(email);
+    const licenseInfo = await findLicenseKeyByEmail(email, config);
 
     if (!licenseInfo) {
-      // Still return success-like response to prevent email enumeration
-      // But give a hint that they should check their email
       console.log(`[Recover] No license found for: ${email}`);
       return res.status(200).json({
         sent: false,
@@ -276,7 +256,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // Check if license is disabled
     if (licenseInfo.status === 'disabled') {
       return res.status(200).json({
         sent: false,
@@ -284,7 +263,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // Send recovery email via Resend
     if (!RESEND_API_KEY) {
       console.error('[Recover] RESEND_API_KEY not configured');
       return res.status(200).json({
