@@ -14,10 +14,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 // Single API key for BOTH environments — Dodo does NOT have separate test/live keys
-const API_KEY =
-  process.env.DODO_API_KEY_LIVE ||
-  process.env.DODO_API_KEY ||
-  '';
+const API_KEY = process.env.DODO_API_KEY || '';
 
 const PRODUCT_IDS = {
   test: process.env.DODO_PRODUCT_ID_TEST || 'pdt_0NgJpLrjYb5WyvHwo2Z5X',
