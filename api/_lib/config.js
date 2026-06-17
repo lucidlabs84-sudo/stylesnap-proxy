@@ -25,30 +25,9 @@ const BASE_URLS = {
 let configCache = null;
 const CACHE_TTL_MS = 30_000;
 
-// Read a single key from Supabase dodo_config table
-async function readFromSupabase(key) {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    console.error('[Config] Missing SUPABASE_URL or SERVICE_ROLE_KEY');
-    return null;
-  }
-  try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/dodo_config?key=eq.${key}&select=value`,
-      {
-        headers: {
-          apikey: SUPABASE_SERVICE_ROLE_KEY,
-          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-        },
-      }
-    );
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (Array.isArray(data) && data.length > 0) return data[0].value;
-    return null;
-  } catch (err) {
-    console.error(`[Config] Supabase read error (${key}):`, err.message);
-    return null;
-  }
+// Call this to force next getConfig() to re-read from Supabase
+function clearCache() {
+  configCache = null;
 }
 
 // Read all config from Supabase at once (single round-trip)
@@ -113,4 +92,4 @@ function getConfigSync() {
   };
 }
 
-module.exports = { getConfig, getConfigSync };
+module.exports = { getConfig, getConfigSync, clearCache };
