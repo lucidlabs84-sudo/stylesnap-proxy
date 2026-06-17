@@ -23,7 +23,7 @@ const BASE_URLS = {
 
 // Cache: { data, expiry }
 let configCache = null;
-const CACHE_TTL_MS = 30_000;
+const CACHE_TTL_MS = 0;
 
 // Call this to force next getConfig() to re-read from Supabase
 function clearCache() {
