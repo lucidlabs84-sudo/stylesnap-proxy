@@ -23,29 +23,57 @@ export default async function handler(req, res) {
     if (!dodoRes.ok) {
       const errText = await dodoRes.text();
       console.error('[ProductInfo] Dodo error:', dodoRes.status, errText);
-      return res.status(200).json({ error: 'Failed to fetch product info' });
+      // 降级：返回默认价格
+      return res.status(200).json({
+        name: 'StyleSnap Pro',
+        price: 2900,
+        currency: 'USD',
+        formatted_price: '$29',
+        description: 'StyleSnap Pro - Lifetime License. Extract CSS styles and generate code with AI.',
+        active: true,
+      });
     }
 
     const data = await dodoRes.json();
 
-    // 返回官网需要的信息
+    // 提取价格（单位：分）
+    // DodoPayments 返回格式: { price: { price: number, currency: string } }
+    const priceInCents = (data.price && typeof data.price.price === 'number')
+      ? data.price.price
+      : 2900; // 默认 $29
+
+    const currency = (data.price && data.price.currency) || data.currency || 'USD';
+
+    // 如果价格为 0，使用默认 $29
+    const finalPriceInCents = priceInCents > 0 ? priceInCents : 2900;
+
+    const formattedPrice = formatPrice(finalPriceInCents, currency);
+
     return res.status(200).json({
       name: data.name || 'StyleSnap Pro',
-      price: data.price || data.amount || 2900, // 价格单位：分
-      currency: data.currency || 'USD',
-      formatted_price: formatPrice(data.price || data.amount || 2900, data.currency || 'USD'),
+      price: finalPriceInCents,
+      currency: currency,
+      formatted_price: formattedPrice,
       description: data.description || '',
       active: data.active !== false,
     });
 
   } catch (err) {
     console.error('[ProductInfo] Error:', err.message);
-    return res.status(200).json({ error: 'Service unavailable' });
+    // 降级：返回默认价格
+    return res.status(200).json({
+      name: 'StyleSnap Pro',
+      price: 2900,
+      currency: 'USD',
+      formatted_price: '$29',
+      description: 'StyleSnap Pro - Lifetime License.',
+      active: true,
+    });
   }
 }
 
-function formatPrice(amount, currency = 'USD') {
-  if (!amount) return '$29';
-  const dollars = amount / 100;
+function formatPrice(amountInCents, currency = 'USD') {
+  if (!amountInCents || amountInCents <= 0) return '$29';
+  const dollars = amountInCents / 100;
   return `$${Math.round(dollars)}`;
 }
