@@ -1,4 +1,4 @@
-import { clearCache } from "./ _lib/config";
+import { clearCache } from "./_lib/config";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
