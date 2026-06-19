@@ -2,17 +2,68 @@
 // POST /api/deactivate
 // Body: { license_key: string, instance_id: string }
 // Returns: { deactivated: boolean, error? }
+//
+// Security: Validates x-extension-id header, CORS restricted to extension origin,
+//           Rate Limit: 10 requests/minute per IP (Upstash Redis)
 
 const { getConfig } = require('./_lib/config');
+const { Redis } = require('@upstash/redis');
+
+const EXTENSION_ID = 'hcoekdefjdnjbjhdhemgjagchcgkggb';
+
+// ─── Upstash Redis Rate Limiter ───────────────
+const REDIS_URL   = process.env.UPSTASH_REDIS_REST_URL || '';
+const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || '';
+
+function getRedis() {
+  if (!REDIS_URL || !REDIS_TOKEN) return null;
+  return new Redis({ url: REDIS_URL, token: REDIS_TOKEN });
+}
+
+const RATE_LIMIT_WINDOW = 60   // 1 minute
+const RATE_LIMIT_MAX    = 10   // 10 requests per window
+
+async function checkRateLimit(ip) {
+  const redis = getRedis()
+  if (!redis) {
+    console.warn('[Deactivate] ⚠️ Redis not configured — skipping rate limit')
+    return true // Allow when Redis is not configured
+  }
+  const key = `ratelimit:deactivate:${ip}`
+  const current = await redis.incr(key)
+  if (current === 1) {
+    await redis.expire(key, RATE_LIMIT_WINDOW)
+  }
+  return current <= RATE_LIMIT_MAX
+}
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Cache-Control', 'no-store');
+  // ─── CORS: only allow extension origin ───────────────
+  const origin  = req.headers.origin || ''
+  const referer = req.headers.referer || ''
+  const isFromExtension = origin.includes(EXTENSION_ID) || referer.includes(EXTENSION_ID)
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  res.setHeader('Access-Control-Allow-Origin', isFromExtension ? origin : '')
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-extension-id')
+  res.setHeader('Cache-Control', 'no-store')
+
+  if (req.method === 'OPTIONS') return res.status(200).end()
+
+  // ─── Validate extension header ───────────────
+  const extId = req.headers['x-extension-id'] || ''
+  if (extId !== EXTENSION_ID) {
+    console.warn('[Deactivate] ❌ Invalid extension ID:', extId)
+    return res.status(403).json({ error: 'Forbidden: invalid origin' })
+  }
+
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
+
+  // ─── Rate Limit ──────────────────────────
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown'
+  if (!await checkRateLimit(clientIp)) {
+    return res.status(429).json({ error: 'Too many requests. Please try again later.' })
+  }
 
   try {
     const config = await getConfig();
@@ -29,9 +80,9 @@ export default async function handler(req, res) {
     }
 
     const deactivateRes = await fetch(`${config.baseUrl}/licenses/deactivate`, {
-      method: 'POST',
+      method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      body:    JSON.stringify({
         license_key: licenseKey,
         license_key_instance_id: instanceId,
       }),
