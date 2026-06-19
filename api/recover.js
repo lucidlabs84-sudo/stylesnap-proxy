@@ -2,31 +2,43 @@
 // POST /api/recover
 // Body: { email: string }
 // Returns: { sent: boolean, message: string }
+//
+// Security: Validates x-extension-id header, CORS restricted to extension origin,
+//           Rate Limit: 3 requests/10 minutes per email (Upstash Redis)
 
 const { getConfig } = require('./_lib/config');
+const { Redis } = require('@upstash/redis');
+
+const EXTENSION_ID = 'hcoekdefjdnjbjhdhemgjagchcgkggb';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const FROM_EMAIL = process.env.FROM_EMAIL || 'StyleSnap <noreply@lucidlibs.dev>';
 const RECOVERY_URL = process.env.RECOVERY_URL || 'https://style.lucidlibs.dev/recover';
 
-// Simple in-memory rate limiter (per email, 10 min cooldown)
-const rateLimitMap = new Map();
-const RATE_LIMIT_MS = 10 * 60 * 1000;
+// ── Upstash Redis Rate Limiter ───────────────
+const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL || '';
+const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || '';
 
-function isRateLimited(email) {
-  const key = email.toLowerCase().trim();
-  const lastTime = rateLimitMap.get(key);
-  if (lastTime && (Date.now() - lastTime) < RATE_LIMIT_MS) {
-    return true;
+function getRedis() {
+  if (!REDIS_URL || !REDIS_TOKEN) return null;
+  return new Redis({ url: REDIS_URL, token: REDIS_TOKEN });
+}
+
+const RATE_LIMIT_WINDOW = 10 * 60   // 10 minutes
+const RATE_LIMIT_MAX = 3              // 3 requests per window
+
+async function checkRateLimit(email) {
+  const redis = getRedis();
+  if (!redis) {
+    console.warn('[Recover] ⚠️ Redis not configured — skipping rate limit');
+    return true; // Allow when Redis is not configured
   }
-  rateLimitMap.set(key, Date.now());
-  if (rateLimitMap.size > 500) {
-    const cutoff = Date.now() - RATE_LIMIT_MS;
-    for (const [k, v] of rateLimitMap) {
-      if (v < cutoff) rateLimitMap.delete(k);
-    }
+  const key = `ratelimit:recover:${email.toLowerCase().trim()}`;
+  const current = await redis.incr(key);
+  if (current === 1) {
+    await redis.expire(key, RATE_LIMIT_WINDOW);
   }
-  return false;
+  return current <= RATE_LIMIT_MAX;
 }
 
 async function findLicenseKeyByEmail(email, config) {
@@ -215,12 +227,25 @@ https://style.lucidlibs.dev`;
 }
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // ── CORS: only allow extension origin ─────────────
+  const origin  = req.headers.origin || '';
+  const referer = req.headers.referer || '';
+  const isFromExtension = origin.includes(EXTENSION_ID) || referer.includes(EXTENSION_ID);
+
+  res.setHeader('Access-Control-Allow-Origin', isFromExtension ? origin : '');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-extension-id');
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
+
+  // ── Validate extension header ─────────────
+  const extId = req.headers['x-extension-id'] || '';
+  if (extId !== EXTENSION_ID) {
+    console.warn('[Recover] ❌ Invalid extension ID:', extId);
+    return res.status(403).json({ error: 'Forbidden: invalid origin' });
+  }
+
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
@@ -236,7 +261,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ sent: false, message: 'Please enter a valid email address.' });
     }
 
-    if (isRateLimited(email)) {
+    if (!await checkRateLimit(email)) {
       return res.status(200).json({
         sent: false,
         message: 'Too many requests. Please wait 10 minutes before trying again.',

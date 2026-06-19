@@ -1,10 +1,24 @@
 // Vercel Serverless Function — List License Key Instances
 // GET /api/instances?license_key_id=xxx
+//
+// Security: Admin authentication required (Authorization header)
 
 const { getConfig } = require('./_lib/config');
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // ── Admin Authentication ───────────────────────
+  const ADMIN_API_KEY = process.env.ADMIN_API_KEY || '';
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.replace('Bearer ', '');
+
+  if (!ADMIN_API_KEY || token !== ADMIN_API_KEY) {
+    return res.status(401).json({ error: 'Unauthorized. Admin API key required.' });
+  }
+
+  // Restrict CORS to admin dashboard only
+  const origin = req.headers.origin || '';
+  const allowedOrigin = process.env.ADMIN_DASHBOARD_URL || 'https://lucidlibs.dev';
+  res.setHeader('Access-Control-Allow-Origin', origin === allowedOrigin ? origin : '');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Cache-Control', 'no-store');
