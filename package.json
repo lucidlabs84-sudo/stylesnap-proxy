@@ -1,6 +1,8 @@
 {
   "name": "stylesnap-proxy",
   "version": "1.0.0",
-  "dependencies": {},
-  "devDependencies": {}
+  "dependencies": {
+    "@upstash/redis": "^1.38.0",
+    "resend": "^6.14.0"
+  }
 }
