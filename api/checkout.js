@@ -62,8 +62,11 @@ export default async function handler(req, res) {
   const isWebsiteOrigin = origin.includes('lucidlibs.dev') ||
                           origin.includes('stylesnap.vercel.app') ||
                           origin.includes('localhost')
+  const isExtensionOrigin = origin.startsWith('chrome-extension://') ||
+                            referer.startsWith('chrome-extension://')
   const extId = req.headers['x-extension-id'] || ''
-  if (!isWebsiteOrigin && extId !== EXTENSION_ID) {
+  // Allow website origins (public checkout), any extension origin, or matching extension ID
+  if (!isWebsiteOrigin && !isExtensionOrigin && extId !== EXTENSION_ID) {
     console.warn('[Checkout] ❌ Invalid extension ID:', extId)
     return res.status(403).json({ error: 'Forbidden: invalid origin' })
   }
