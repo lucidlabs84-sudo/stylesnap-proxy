@@ -227,23 +227,34 @@ https://style.lucidlibs.dev`;
 }
 
 export default async function handler(req, res) {
-  // ── CORS: only allow extension origin ─────────────
+  // ── CORS: allow extension origin + website domains ─────────────
   const origin  = req.headers.origin || '';
   const referer = req.headers.referer || '';
-  const isFromExtension = origin.includes(EXTENSION_ID) || referer.includes(EXTENSION_ID);
+  const ALLOWED_ORIGINS = [
+    EXTENSION_ID,                   // chrome-extension://...
+    'lucidlibs.dev',                // main website
+    'stylesnap.vercel.app',         // Vercel deploy
+    'localhost',                    // local dev
+  ]
+  const isAllowed = ALLOWED_ORIGINS.some(allowed =>
+    origin.includes(allowed) || referer.includes(allowed)
+  )
 
-  res.setHeader('Access-Control-Allow-Origin', isFromExtension ? origin : '');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-extension-id');
-  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Access-Control-Allow-Origin', isAllowed ? origin : '')
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-extension-id')
+  res.setHeader('Cache-Control', 'no-store')
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method === 'OPTIONS') return res.status(200).end()
 
-  // ── Validate extension header ─────────────
-  const extId = req.headers['x-extension-id'] || '';
-  if (extId !== EXTENSION_ID) {
-    console.warn('[Recover] ❌ Invalid extension ID:', extId);
-    return res.status(403).json({ error: 'Forbidden: invalid origin' });
+  // ── Validate extension header (skip for website origins) ─────
+  const isWebsiteOrigin = origin.includes('lucidlibs.dev') ||
+                          origin.includes('stylesnap.vercel.app') ||
+                          origin.includes('localhost')
+  const extId = req.headers['x-extension-id'] || ''
+  if (!isWebsiteOrigin && extId !== EXTENSION_ID) {
+    console.warn('[Recover] ❌ Invalid extension ID:', extId)
+    return res.status(403).json({ error: 'Forbidden: invalid origin' })
   }
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
