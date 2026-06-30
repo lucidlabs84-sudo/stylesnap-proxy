@@ -6,13 +6,11 @@
 // Free users: 1 generation per day (tracked via Redis)
 // Pro users:  unlimited (validated via DodoPayments license API)
 //
-// Security: Validates x-extension-id header, CORS restricted to extension origin,
-//           Rate Limit: 5 requests/minute per IP (Upstash Redis)
+// Security: Rate Limit: 5 requests/minute per IP (Upstash Redis)
+// Real security is DodoPayments license key validation.
 
 const { getConfig } = require('./_lib/config');
 const { Redis } = require('@upstash/redis');
-
-const EXTENSION_ID = 'hcoekdefjdnjbjhdhemgjagchcgkggb';
 
 // ── Upstash Redis ───────────────
 const REDIS_URL   = process.env.UPSTASH_REDIS_REST_URL || '';
@@ -91,7 +89,10 @@ async function validateProLicense(licenseKey, instanceId, config) {
 
     const validateRes = await fetch(`${config.baseUrl}/licenses/validate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.apiKey}`,
+      },
       body: JSON.stringify(validateBody),
     });
 
@@ -145,26 +146,14 @@ async function callGroq(prompt) {
 
 // ── Handler ───────────────
 export default async function handler(req, res) {
-  // ── CORS ───────────────
-  const origin  = req.headers.origin || '';
-  const referer = req.headers.referer || '';
-  const isFromExtension = origin.includes(EXTENSION_ID) || referer.includes(EXTENSION_ID);
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  res.setHeader('Cache-Control', 'no-store')
 
-  res.setHeader('Access-Control-Allow-Origin', isFromExtension ? origin : '');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-extension-id');
-  res.setHeader('Cache-Control', 'no-store');
+  if (req.method === 'OPTIONS') return res.status(200).end()
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
-
-  // ── Validate extension header ───────────────
-  const extId = req.headers['x-extension-id'] || '';
-  if (extId !== EXTENSION_ID) {
-    console.warn('[GenComponent] ❌ Invalid extension ID:', extId);
-    return res.status(403).json({ error: 'Forbidden: invalid origin' });
-  }
-
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
   // ── Rate Limit ───────────────
   const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';

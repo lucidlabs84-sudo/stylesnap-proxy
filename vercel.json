@@ -1,12 +1,6 @@
 {
   "functions": {
     "api/*.js": {
-      "maxDuration": 10
-    },
-    "api/feedback.js": {
-      "maxDuration": 10
-    },
-    "api/generate-component.js": {
       "maxDuration": 30
     }
   }
