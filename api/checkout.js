@@ -149,6 +149,12 @@ export default async function handler(req, res) {
     const returnUrl = (body || {}).return_url || 'https://lucidlibs.dev/stylesnap/success'
     const cancelUrl = (body || {}).cancel_url || 'https://lucidlibs.dev/stylesnap'
 
+    // ─── Email validation (required for website checkouts) ────
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (isWebsiteOrigin && (!email || !EMAIL_RE.test(email))) {
+      return res.status(200).json({ error: 'A valid email address is required for checkout.' });
+    }
+
     // Check for duplicate purchase BEFORE creating checkout
     if (email) {
       const duplicate = await checkDuplicateEmail(email, config);
